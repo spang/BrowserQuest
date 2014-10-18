@@ -15,7 +15,8 @@ module.exports = Player = Character.extend({
         this.server = worldServer;
         this.connection = connection;
 
-        this._super(this.connection.id, "player", Types.Entities.WARRIOR, 0, 0, "");
+        // generate a ~random ID for this player. millisecond racy.
+        this._super(new Date().getTime(), "player", Types.Entities.WARRIOR, 0, 0, "");
 
         this.hasEnteredGame = false;
         this.isDead = false;
@@ -23,8 +24,11 @@ module.exports = Player = Character.extend({
         this.lastCheckpoint = null;
         this.formatChecker = new FormatChecker();
         this.disconnectTimeout = null;
+
+        log.info("Client %s connected.", this.id);
         
-        this.connection.listen(function(message) {
+        this.connection.on("message", function(message) {
+            message = JSON.parse(message);
             var action = parseInt(message[0]);
             
             log.debug("Received: "+message);
@@ -62,7 +66,11 @@ module.exports = Player = Character.extend({
                 self.server.addPlayer(self);
                 self.server.enter_callback(self);
 
-                self.send([Types.Messages.WELCOME, self.id, self.name, self.x, self.y, self.hitPoints]);
+                self.send([Types.Messages.WELCOME, self.id, self.name, self.x, self.y, self.hitPoints], function(error) {
+                    if (error)
+                        log.error("error encountered: %s", error);
+                });
+    
                 self.hasEnteredGame = true;
                 self.isDead = false;
             }
@@ -165,7 +173,8 @@ module.exports = Player = Character.extend({
                                 self.broadcast(self.equip(self.armor)); // return to normal after 15 sec
                                 self.firepotionTimeout = null;
                             }, 15000);
-                            self.send(new Messages.HitPoints(self.maxHitPoints).serialize());
+                            self.send(new Messages.HitPoints(self.maxHitPoints).serialize(),
+                                    function(error) { if (error) log.error("error encountered: %s", error); });
                         } else if(Types.isHealingItem(kind)) {
                             var amount;
                             
@@ -222,7 +231,8 @@ module.exports = Player = Character.extend({
             }
         });
         
-        this.connection.onClose(function() {
+        this.connection.on("close", function() {
+            log.info("Closing connection for player " + self.id);
             if(self.firepotionTimeout) {
                 clearTimeout(self.firepotionTimeout);
             }
@@ -231,8 +241,13 @@ module.exports = Player = Character.extend({
                 self.exit_callback();
             }
         });
-        
-        this.connection.sendUTF8("go"); // Notify client that the HELLO/WELCOME handshake can start
+
+        // Notify client that the HELLO/WELCOME handshake can start
+        log.info("sending GO");
+        this.connection.send("go", function(error) {
+            if (error)
+                log.error("error encountered: %s", error);
+        });
     },
     
     destroy: function() {
@@ -261,7 +276,10 @@ module.exports = Player = Character.extend({
     },
     
     send: function(message) {
-        this.connection.send(message);
+        this.connection.send(message, function(error) {
+            if (error);
+                log.error("error encountered: %s", error);
+        });
     },
     
     broadcast: function(message, ignoreSelf) {
@@ -349,7 +367,11 @@ module.exports = Player = Character.extend({
             if(Types.isArmor(item.kind)) {
                 this.equipArmor(item.kind);
                 this.updateHitPoints();
-                this.send(new Messages.HitPoints(this.maxHitPoints).serialize());
+                this.connection.send(new Messages.HitPoints(this.maxHitPoints).serialize(),
+                        function(error) {
+                            if (error)
+                                log.error("error encountered: %s", error);
+                        });
             } else if(Types.isWeapon(item.kind)) {
                 this.equipWeapon(item.kind);
             }
@@ -377,7 +399,7 @@ module.exports = Player = Character.extend({
     },
     
     timeout: function() {
-        this.connection.sendUTF8("timeout");
+        this.connection.send("timeout");
         this.connection.close("Player was idle for too long");
     }
 });

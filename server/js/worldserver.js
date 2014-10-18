@@ -314,7 +314,8 @@ module.exports = World = cls.Class.extend({
 
         for(var id in this.outgoingQueues) {
             if(this.outgoingQueues[id].length > 0) {
-                connection = this.server.getConnection(id);
+                log.info("[" + id + "] flushing queue: " + this.outgoingQueues[id]);
+                connection = this.players[id].connection;
                 connection.send(this.outgoingQueues[id]);
                 this.outgoingQueues[id] = [];
             }
